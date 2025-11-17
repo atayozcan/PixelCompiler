@@ -6,6 +6,6 @@
 #include <memory>
 
 namespace mlir::pixel {
-    /// Create a pass to lower Pixel dialect to LLVM dialect
-    std::unique_ptr<Pass> createPixelToLLVMLoweringPass();
+/// Create a pass to lower Pixel dialect to LLVM dialect
+std::unique_ptr<Pass> createPixelToLLVMLoweringPass();
 } // namespace mlir::pixel

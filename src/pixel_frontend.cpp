@@ -3,34 +3,23 @@
 // Parser implementation for .px files
 //
 //===----------------------------------------------------------------------===//
-
 #include "pixel_frontend.h"
 #include "PixelDialect.h"
-
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Verifier.h"
-
-#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/raw_ostream.h"
-
-#include <cctype>
-#include <map>
-#include <sstream>
-#include <string>
-#include <vector>
-
 using namespace mlir;
 using namespace mlir::pixel;
+using namespace std;
+using namespace llvm;
 
 namespace {
-
 //===----------------------------------------------------------------------===//
 // Lexer
 //===----------------------------------------------------------------------===//
-
 enum Token {
   tok_eof = -1,
   tok_image = -2,
@@ -39,7 +28,7 @@ enum Token {
   tok_bmp = -5,
   tok_identifier = -6,
   tok_string = -7,
-  tok_arrow = -8,  // ->
+  tok_arrow = -8, // ->
   tok_colon = -9,
   tok_invert = -10,
   tok_grayscale = -11,
@@ -48,27 +37,25 @@ enum Token {
 };
 
 class Lexer {
-  std::string input;
+  string input;
   size_t pos = 0;
 
 public:
-  std::string identifierStr;
-  std::string stringVal;
+  string identifierStr;
+  string stringVal;
   double numberVal;
 
-  explicit Lexer(std::string input) : input(std::move(input)) {}
+  explicit Lexer(string input) : input(std::move(input)), numberVal(0) {}
 
   int getNextToken() {
     // Skip whitespace and comments
-    while (pos < input.size() && (std::isspace(input[pos]) || input[pos] == '#')) {
-      if (input[pos] == '#') {
+    while (pos < input.size() && (isspace(input[pos]) || input[pos] == '#'))
+      if (input[pos] == '#')
         // Skip comment line
         while (pos < input.size() && input[pos] != '\n')
           pos++;
-      } else {
+      else
         pos++;
-      }
-    }
 
     if (pos >= input.size())
       return tok_eof;
@@ -77,9 +64,8 @@ public:
     if (input[pos] == '"') {
       pos++; // skip opening quote
       stringVal.clear();
-      while (pos < input.size() && input[pos] != '"') {
+      while (pos < input.size() && input[pos] != '"')
         stringVal += input[pos++];
-      }
       if (pos < input.size())
         pos++; // skip closing quote
       return tok_string;
@@ -98,56 +84,48 @@ public:
     }
 
     // Numbers
-    if (std::isdigit(input[pos]) || input[pos] == '-') {
-      std::string numStr;
+    if (isdigit(input[pos]) || input[pos] == '-') {
+      string numStr;
       numStr += input[pos++];
-      while (pos < input.size() && (std::isdigit(input[pos]) || input[pos] == '.')) {
+      while (pos < input.size() && (isdigit(input[pos]) || input[pos] == '.'))
         numStr += input[pos++];
-      }
-      numberVal = std::stod(numStr);
+      numberVal = stod(numStr);
       return tok_number;
     }
 
     // Identifiers and keywords
-    if (std::isalpha(input[pos]) || input[pos] == '_') {
-      identifierStr.clear();
-      while (pos < input.size() && (std::isalnum(input[pos]) || input[pos] == '_')) {
-        identifierStr += input[pos++];
-      }
-
-      if (identifierStr == "image")
-        return tok_image;
-      if (identifierStr == "operations")
-        return tok_operations;
-      if (identifierStr == "as")
-        return tok_as;
-      if (identifierStr == "bmp")
-        return tok_bmp;
-      if (identifierStr == "invert")
-        return tok_invert;
-      if (identifierStr == "grayscale")
-        return tok_grayscale;
-      if (identifierStr == "rotate")
-        return tok_rotate;
-
-      return tok_identifier;
+    if (!isalpha(input[pos]) && input[pos] != '_') {
+      // Unknown character
+      pos++;
+      return input[pos - 1];
     }
+    identifierStr.clear();
+    while (pos < input.size() && (isalnum(input[pos]) || input[pos] == '_'))
+      identifierStr += input[pos++];
 
-    // Unknown character
-    pos++;
-    return input[pos - 1];
+    if (identifierStr == "image")
+      return tok_image;
+    if (identifierStr == "operations")
+      return tok_operations;
+    if (identifierStr == "as")
+      return tok_as;
+    if (identifierStr == "bmp")
+      return tok_bmp;
+    if (identifierStr == "invert")
+      return tok_invert;
+    if (identifierStr == "grayscale")
+      return tok_grayscale;
+    if (identifierStr == "rotate")
+      return tok_rotate;
+    return tok_identifier;
   }
 };
 
 //===----------------------------------------------------------------------===//
 // AST Nodes
 //===----------------------------------------------------------------------===//
-
 struct ImageDecl {
-  std::string name;
-  std::string inputPath;
-  std::string outputPath;
-  std::string format;
+  string name, inputPath, outputPath, format;
 };
 
 enum OpType {
@@ -158,24 +136,23 @@ enum OpType {
 
 struct Operation {
   OpType type;
-  double angle = 0.0; // for rotate
+  double angle = 0;
 };
 
 struct OperationsBlock {
-  std::string imageName;
-  std::vector<Operation> ops;
+  string imageName;
+  vector<Operation> ops;
 };
 
 //===----------------------------------------------------------------------===//
 // Parser
 //===----------------------------------------------------------------------===//
-
 class Parser {
   Lexer &lexer;
   int curTok;
 
-  std::vector<ImageDecl> imageDecls;
-  std::vector<OperationsBlock> operationsBlocks;
+  vector<ImageDecl> imageDecls;
+  vector<OperationsBlock> operationsBlocks;
 
 public:
   explicit Parser(Lexer &lexer) : lexer(lexer) {
@@ -185,7 +162,7 @@ public:
   int getNextToken() { return curTok = lexer.getNextToken(); }
 
   bool parseScript() {
-    while (curTok != tok_eof) {
+    while (curTok != tok_eof)
       if (curTok == tok_image) {
         if (!parseImageDecl())
           return false;
@@ -193,10 +170,9 @@ public:
         if (!parseOperationsBlock())
           return false;
       } else {
-        llvm::errs() << "Unexpected token in script\n";
+        errs() << "Unexpected token in script\n";
         return false;
       }
-    }
     return true;
   }
 
@@ -204,7 +180,7 @@ public:
     getNextToken(); // consume 'image'
 
     if (curTok != tok_identifier) {
-      llvm::errs() << "Expected identifier after 'image'\n";
+      errs() << "Expected identifier after 'image'\n";
       return false;
     }
 
@@ -213,33 +189,33 @@ public:
     getNextToken();
 
     if (curTok != tok_string) {
-      llvm::errs() << "Expected input path string\n";
+      errs() << "Expected input path string\n";
       return false;
     }
     decl.inputPath = lexer.stringVal;
     getNextToken();
 
     if (curTok != tok_arrow) {
-      llvm::errs() << "Expected '->'\n";
+      errs() << "Expected '->'\n";
       return false;
     }
     getNextToken();
 
     if (curTok != tok_string) {
-      llvm::errs() << "Expected output path string\n";
+      errs() << "Expected output path string\n";
       return false;
     }
     decl.outputPath = lexer.stringVal;
     getNextToken();
 
     if (curTok != tok_as) {
-      llvm::errs() << "Expected 'as'\n";
+      errs() << "Expected 'as'\n";
       return false;
     }
     getNextToken();
 
     if (curTok != tok_bmp) {
-      llvm::errs() << "Expected format (bmp)\n";
+      errs() << "Expected format (bmp)\n";
       return false;
     }
     decl.format = "bmp";
@@ -253,7 +229,7 @@ public:
     getNextToken(); // consume 'operations'
 
     if (curTok != tok_identifier) {
-      llvm::errs() << "Expected image name after 'operations'\n";
+      errs() << "Expected image name after 'operations'\n";
       return false;
     }
 
@@ -262,13 +238,14 @@ public:
     getNextToken();
 
     if (curTok != tok_colon) {
-      llvm::errs() << "Expected ':' after image name\n";
+      errs() << "Expected ':' after image name\n";
       return false;
     }
     getNextToken();
 
     // Parse operations
-    while (curTok != tok_eof && curTok != tok_image && curTok != tok_operations) {
+    while (curTok != tok_eof && curTok != tok_image &&
+           curTok != tok_operations) {
       if (curTok == tok_invert) {
         block.ops.push_back({OpInvert});
         getNextToken();
@@ -278,14 +255,13 @@ public:
       } else if (curTok == tok_rotate) {
         getNextToken();
         if (curTok != tok_number) {
-          llvm::errs() << "Expected angle after 'rotate'\n";
+          errs() << "Expected angle after 'rotate'\n";
           return false;
         }
         block.ops.push_back({OpRotate, lexer.numberVal});
         getNextToken();
-      } else {
+      } else
         break;
-      }
     }
 
     operationsBlocks.push_back(block);
@@ -294,18 +270,19 @@ public:
 
   OwningOpRef<ModuleOp> generateMLIR(MLIRContext &context) {
     // Create module
-    auto loc = UnknownLoc::get(&context);
+    const auto loc = UnknownLoc::get(&context);
     OwningOpRef<ModuleOp> module = ModuleOp::create(loc);
     OpBuilder builder(module->getBodyRegion());
 
-    // Create main function
-    auto funcType = FunctionType::get(&context, {}, {});
+    // Create main function with i32 return type
+    auto i32Type = builder.getI32Type();
+    auto funcType = FunctionType::get(&context, {}, {i32Type});
     auto mainFunc = builder.create<func::FuncOp>(loc, "main", funcType);
     auto &entryBlock = *mainFunc.addEntryBlock();
     builder.setInsertionPointToStart(&entryBlock);
 
     // Map from image name to SSA value
-    std::map<std::string, Value> imageMap;
+    map<string, Value> imageMap;
 
     // Generate code for image declarations
     for (auto &decl : imageDecls) {
@@ -316,64 +293,64 @@ public:
     }
 
     // Generate code for operations blocks
-    for (auto &block : operationsBlocks) {
-      if (imageMap.find(block.imageName) == imageMap.end()) {
-        llvm::errs() << "Unknown image: " << block.imageName << "\n";
+    for (auto &[imageName, ops] : operationsBlocks) {
+      if (!imageMap.contains(imageName)) {
+        errs() << "Unknown image: " << imageName << "\n";
         return nullptr;
       }
 
-      Value currentImage = imageMap[block.imageName];
+      Value currentImage = imageMap[imageName];
       auto imageType = ImageType::get(&context);
 
       // Apply operations sequentially
-      for (auto &op : block.ops) {
-        switch (op.type) {
+      for (auto &[type, angle] : ops)
+        switch (type) {
         case OpInvert:
-          currentImage = builder.create<InvertOp>(loc, imageType, currentImage).getResult();
+          currentImage = builder.create<InvertOp>(loc, imageType, currentImage)
+                             .getResult();
           break;
         case OpGrayscale:
-          currentImage = builder.create<GrayscaleOp>(loc, imageType, currentImage).getResult();
+          currentImage =
+              builder.create<GrayscaleOp>(loc, imageType, currentImage)
+                  .getResult();
           break;
         case OpRotate:
-          currentImage = builder.create<RotateOp>(
-              loc, imageType, currentImage,
-              builder.getF32FloatAttr(op.angle)).getResult();
+          currentImage = builder
+                             .create<RotateOp>(loc, imageType, currentImage,
+                                               builder.getF32FloatAttr(angle))
+                             .getResult();
           break;
         }
-      }
 
       // Save the result
-      for (auto &decl : imageDecls) {
-        if (decl.name == block.imageName) {
+      for (auto &decl : imageDecls)
+        if (decl.name == imageName) {
           builder.create<SaveOp>(
               loc, currentImage,
               builder.getStringAttr(decl.outputPath + ".bmp"),
               builder.getStringAttr(decl.format));
           break;
         }
-      }
     }
 
-    // Add return
-    builder.create<func::ReturnOp>(loc);
-
+    // Add return with exit code 0
+    auto zero = builder.create<arith::ConstantIntOp>(loc, 0, 32);
+    builder.create<func::ReturnOp>(loc, ValueRange{zero});
     return module;
   }
 };
-
 } // anonymous namespace
 
 //===----------------------------------------------------------------------===//
 // Public API
 //===----------------------------------------------------------------------===//
-
-mlir::OwningOpRef<mlir::ModuleOp> parsePixelScript(const std::string &scriptText,
-                                                     mlir::MLIRContext &context) {
+OwningOpRef<ModuleOp> parsePixelScript(const string &scriptText,
+                                       MLIRContext &context) {
   Lexer lexer(scriptText);
   Parser parser(lexer);
 
   if (!parser.parseScript()) {
-    llvm::errs() << "Failed to parse Pixel script\n";
+    errs() << "Failed to parse Pixel script\n";
     return nullptr;
   }
 

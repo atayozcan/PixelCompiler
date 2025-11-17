@@ -3,29 +3,25 @@
 // Implements lowering from Pixel dialect to LLVM dialect
 //
 //===----------------------------------------------------------------------===//
-
 #include "PixelDialect.h"
-
-#include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
 #include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
-
 using namespace mlir;
 using namespace mlir::pixel;
+using namespace std;
 
 //===----------------------------------------------------------------------===//
 // Type Converter
 //===----------------------------------------------------------------------===//
-
-class PixelTypeConverter : public LLVMTypeConverter {
+class PixelTypeConverter final : public LLVMTypeConverter {
 public:
-  PixelTypeConverter(MLIRContext *ctx) : LLVMTypeConverter(ctx) {
+  explicit PixelTypeConverter(MLIRContext *ctx) : LLVMTypeConverter(ctx) {
     // Convert ImageType to opaque pointer (!llvm.ptr)
-    addConversion([](ImageType type) {
+    addConversion([](const ImageType type) {
       return LLVM::LLVMPointerType::get(type.getContext());
     });
   }
@@ -34,13 +30,12 @@ public:
 //===----------------------------------------------------------------------===//
 // Conversion Patterns
 //===----------------------------------------------------------------------===//
-
 namespace {
-
 // Helper to create or get a runtime function declaration
 LLVM::LLVMFuncOp getOrInsertFunction(PatternRewriter &rewriter, ModuleOp module,
-                                      StringRef name, LLVM::LLVMFunctionType fnType) {
-  if (auto fn = module.lookupSymbol<LLVM::LLVMFuncOp>(name))
+                                     StringRef name,
+                                     LLVM::LLVMFunctionType fnType) {
+  if (const auto fn = module.lookupSymbol<LLVM::LLVMFuncOp>(name))
     return fn;
 
   PatternRewriter::InsertionGuard guard(rewriter);
@@ -49,28 +44,29 @@ LLVM::LLVMFuncOp getOrInsertFunction(PatternRewriter &rewriter, ModuleOp module,
 }
 
 /// Lower pixel.load to runtime call
-struct LoadOpLowering : public ConvertOpToLLVMPattern<LoadOp> {
-  using ConvertOpToLLVMPattern<LoadOp>::ConvertOpToLLVMPattern;
+struct LoadOpLowering final : ConvertOpToLLVMPattern<LoadOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
 
-  LoadOpLowering(const LLVMTypeConverter &typeConverter)
-      : ConvertOpToLLVMPattern<LoadOp>(typeConverter) {}
+  explicit LoadOpLowering(const LLVMTypeConverter &typeConverter)
+      : ConvertOpToLLVMPattern(typeConverter) {}
 
-  LogicalResult matchAndRewrite(LoadOp op, OpAdaptor adaptor,
-                                 ConversionPatternRewriter &rewriter) const override {
+  LogicalResult
+  matchAndRewrite(LoadOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
     auto module = op->getParentOfType<ModuleOp>();
-    auto loc = op.getLoc();
+    const auto loc = op.getLoc();
 
     // Function signature: ptr @_pixel_load(ptr %filepath)
     auto ptrType = LLVM::LLVMPointerType::get(rewriter.getContext());
-    auto fnType = LLVM::LLVMFunctionType::get(ptrType, {ptrType});
+    const auto fnType = LLVM::LLVMFunctionType::get(ptrType, {ptrType});
     auto loadFn = getOrInsertFunction(rewriter, module, "_pixel_load", fnType);
 
     // Convert string to global constant
-    auto filepath = op.getFilepath().str();
-    auto globalName = "_str_" + std::to_string(reinterpret_cast<uintptr_t>(&op));
+    const auto filepath = op.getFilepath().str();
+    auto globalName = "_str_" + to_string(reinterpret_cast<uintptr_t>(&op));
 
     LLVM::GlobalOp global;
-    if (!(global = module.lookupSymbol<LLVM::GlobalOp>(globalName))) {
+    if (!((global = module.lookupSymbol<LLVM::GlobalOp>(globalName)))) {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(module.getBody());
       auto arrayType = LLVM::LLVMArrayType::get(
@@ -81,39 +77,43 @@ struct LoadOpLowering : public ConvertOpToLLVMPattern<LoadOp> {
     }
 
     // Get pointer to string
-    auto globalPtr = rewriter.create<LLVM::AddressOfOp>(loc, ptrType, global.getSymName());
+    auto globalPtr =
+        rewriter.create<LLVM::AddressOfOp>(loc, ptrType, global.getSymName());
 
     // Call runtime function
-    auto callOp = rewriter.create<LLVM::CallOp>(loc, loadFn, ValueRange{globalPtr});
+    auto callOp =
+        rewriter.create<LLVM::CallOp>(loc, loadFn, ValueRange{globalPtr});
     rewriter.replaceOp(op, callOp.getResult());
     return success();
   }
 };
 
 /// Lower pixel.save to runtime call
-struct SaveOpLowering : public ConvertOpToLLVMPattern<SaveOp> {
-  using ConvertOpToLLVMPattern<SaveOp>::ConvertOpToLLVMPattern;
+struct SaveOpLowering final : ConvertOpToLLVMPattern<SaveOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
 
-  SaveOpLowering(const LLVMTypeConverter &typeConverter)
-      : ConvertOpToLLVMPattern<SaveOp>(typeConverter) {}
+  explicit SaveOpLowering(const LLVMTypeConverter &typeConverter)
+      : ConvertOpToLLVMPattern(typeConverter) {}
 
-  LogicalResult matchAndRewrite(SaveOp op, OpAdaptor adaptor,
-                                 ConversionPatternRewriter &rewriter) const override {
+  LogicalResult
+  matchAndRewrite(SaveOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
     auto module = op->getParentOfType<ModuleOp>();
-    auto loc = op.getLoc();
+    const auto loc = op.getLoc();
 
     // Function signature: void @_pixel_save(ptr %image, ptr %filepath)
     auto ptrType = LLVM::LLVMPointerType::get(rewriter.getContext());
-    auto voidType = LLVM::LLVMVoidType::get(rewriter.getContext());
-    auto fnType = LLVM::LLVMFunctionType::get(voidType, {ptrType, ptrType});
+    const auto voidType = LLVM::LLVMVoidType::get(rewriter.getContext());
+    const auto fnType =
+        LLVM::LLVMFunctionType::get(voidType, {ptrType, ptrType});
     auto saveFn = getOrInsertFunction(rewriter, module, "_pixel_save", fnType);
 
     // Convert string to global constant
-    auto filepath = op.getFilepath().str();
-    auto globalName = "_str_" + std::to_string(reinterpret_cast<uintptr_t>(&op));
+    const auto filepath = op.getFilepath().str();
+    auto globalName = "_str_" + to_string(reinterpret_cast<uintptr_t>(&op));
 
     LLVM::GlobalOp global;
-    if (!(global = module.lookupSymbol<LLVM::GlobalOp>(globalName))) {
+    if (!((global = module.lookupSymbol<LLVM::GlobalOp>(globalName)))) {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(module.getBody());
       auto arrayType = LLVM::LLVMArrayType::get(
@@ -123,82 +123,94 @@ struct SaveOpLowering : public ConvertOpToLLVMPattern<SaveOp> {
           rewriter.getStringAttr(filepath + '\0'));
     }
 
-    auto globalPtr = rewriter.create<LLVM::AddressOfOp>(loc, ptrType, global.getSymName());
+    auto globalPtr =
+        rewriter.create<LLVM::AddressOfOp>(loc, ptrType, global.getSymName());
 
     // Call runtime function
-    rewriter.create<LLVM::CallOp>(loc, saveFn, ValueRange{adaptor.getImage(), globalPtr});
+    rewriter.create<LLVM::CallOp>(loc, saveFn,
+                                  ValueRange{adaptor.getImage(), globalPtr});
     rewriter.eraseOp(op);
     return success();
   }
 };
 
 /// Lower pixel.invert to runtime call
-struct InvertOpLowering : public ConvertOpToLLVMPattern<InvertOp> {
-  using ConvertOpToLLVMPattern<InvertOp>::ConvertOpToLLVMPattern;
+struct InvertOpLowering final : ConvertOpToLLVMPattern<InvertOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
 
-  InvertOpLowering(const LLVMTypeConverter &typeConverter)
-      : ConvertOpToLLVMPattern<InvertOp>(typeConverter) {}
+  explicit InvertOpLowering(const LLVMTypeConverter &typeConverter)
+      : ConvertOpToLLVMPattern(typeConverter) {}
 
-  LogicalResult matchAndRewrite(InvertOp op, OpAdaptor adaptor,
-                                 ConversionPatternRewriter &rewriter) const override {
-    auto module = op->getParentOfType<ModuleOp>();
-    auto loc = op.getLoc();
+  LogicalResult
+  matchAndRewrite(InvertOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    const auto module = op->getParentOfType<ModuleOp>();
+    const auto loc = op.getLoc();
 
     // Function signature: ptr @_pixel_invert(ptr %image)
     auto ptrType = LLVM::LLVMPointerType::get(rewriter.getContext());
-    auto fnType = LLVM::LLVMFunctionType::get(ptrType, {ptrType});
-    auto invertFn = getOrInsertFunction(rewriter, module, "_pixel_invert", fnType);
+    const auto fnType = LLVM::LLVMFunctionType::get(ptrType, {ptrType});
+    auto invertFn =
+        getOrInsertFunction(rewriter, module, "_pixel_invert", fnType);
 
-    auto callOp = rewriter.create<LLVM::CallOp>(loc, invertFn, ValueRange{adaptor.getInput()});
+    auto callOp = rewriter.create<LLVM::CallOp>(loc, invertFn,
+                                                ValueRange{adaptor.getInput()});
     rewriter.replaceOp(op, callOp.getResult());
     return success();
   }
 };
 
 /// Lower pixel.grayscale to runtime call
-struct GrayscaleOpLowering : public ConvertOpToLLVMPattern<GrayscaleOp> {
-  using ConvertOpToLLVMPattern<GrayscaleOp>::ConvertOpToLLVMPattern;
+struct GrayscaleOpLowering final : ConvertOpToLLVMPattern<GrayscaleOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
 
-  GrayscaleOpLowering(const LLVMTypeConverter &typeConverter)
-      : ConvertOpToLLVMPattern<GrayscaleOp>(typeConverter) {}
+  explicit GrayscaleOpLowering(const LLVMTypeConverter &typeConverter)
+      : ConvertOpToLLVMPattern(typeConverter) {}
 
-  LogicalResult matchAndRewrite(GrayscaleOp op, OpAdaptor adaptor,
-                                 ConversionPatternRewriter &rewriter) const override {
-    auto module = op->getParentOfType<ModuleOp>();
-    auto loc = op.getLoc();
+  LogicalResult
+  matchAndRewrite(GrayscaleOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    const auto module = op->getParentOfType<ModuleOp>();
+    const auto loc = op.getLoc();
 
     // Function signature: ptr @_pixel_grayscale(ptr %image)
     auto ptrType = LLVM::LLVMPointerType::get(rewriter.getContext());
-    auto fnType = LLVM::LLVMFunctionType::get(ptrType, {ptrType});
-    auto grayscaleFn = getOrInsertFunction(rewriter, module, "_pixel_grayscale", fnType);
+    const auto fnType = LLVM::LLVMFunctionType::get(ptrType, {ptrType});
+    auto grayscaleFn =
+        getOrInsertFunction(rewriter, module, "_pixel_grayscale", fnType);
 
-    auto callOp = rewriter.create<LLVM::CallOp>(loc, grayscaleFn, ValueRange{adaptor.getInput()});
+    auto callOp = rewriter.create<LLVM::CallOp>(loc, grayscaleFn,
+                                                ValueRange{adaptor.getInput()});
     rewriter.replaceOp(op, callOp.getResult());
     return success();
   }
 };
 
 /// Lower pixel.rotate to runtime call
-struct RotateOpLowering : public ConvertOpToLLVMPattern<RotateOp> {
-  using ConvertOpToLLVMPattern<RotateOp>::ConvertOpToLLVMPattern;
+struct RotateOpLowering final : ConvertOpToLLVMPattern<RotateOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
 
-  RotateOpLowering(const LLVMTypeConverter &typeConverter)
-      : ConvertOpToLLVMPattern<RotateOp>(typeConverter) {}
+  explicit RotateOpLowering(const LLVMTypeConverter &typeConverter)
+      : ConvertOpToLLVMPattern(typeConverter) {}
 
-  LogicalResult matchAndRewrite(RotateOp op, OpAdaptor adaptor,
-                                 ConversionPatternRewriter &rewriter) const override {
-    auto module = op->getParentOfType<ModuleOp>();
-    auto loc = op.getLoc();
+  LogicalResult
+  matchAndRewrite(RotateOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    const auto module = op->getParentOfType<ModuleOp>();
+    const auto loc = op.getLoc();
 
     // Function signature: ptr @_pixel_rotate(ptr %image, float %angle)
     auto ptrType = LLVM::LLVMPointerType::get(rewriter.getContext());
     auto floatType = Float32Type::get(rewriter.getContext());
-    auto fnType = LLVM::LLVMFunctionType::get(ptrType, {ptrType, floatType});
-    auto rotateFn = getOrInsertFunction(rewriter, module, "_pixel_rotate", fnType);
+    const auto fnType =
+        LLVM::LLVMFunctionType::get(ptrType, {ptrType, floatType});
+    auto rotateFn =
+        getOrInsertFunction(rewriter, module, "_pixel_rotate", fnType);
 
     // Create constant for angle
     auto angleAttr = op.getAngle();
-    auto angleConst = rewriter.create<LLVM::ConstantOp>(loc, floatType, angleAttr);
+    auto angleConst =
+        rewriter.create<LLVM::ConstantOp>(loc, floatType, angleAttr);
 
     auto callOp = rewriter.create<LLVM::CallOp>(
         loc, rotateFn, ValueRange{adaptor.getInput(), angleConst});
@@ -206,16 +218,14 @@ struct RotateOpLowering : public ConvertOpToLLVMPattern<RotateOp> {
     return success();
   }
 };
-
 } // namespace
 
 //===----------------------------------------------------------------------===//
 // Lowering Pass
 //===----------------------------------------------------------------------===//
-
 namespace {
-struct PixelToLLVMLoweringPass
-    : public PassWrapper<PixelToLLVMLoweringPass, OperationPass<ModuleOp>> {
+struct PixelToLLVMLoweringPass final
+    : PassWrapper<PixelToLLVMLoweringPass, OperationPass<ModuleOp>> {
 
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PixelToLLVMLoweringPass)
 
@@ -224,7 +234,7 @@ struct PixelToLLVMLoweringPass
   }
 
   void runOnOperation() override {
-    auto module = getOperation();
+    const auto module = getOperation();
     auto *context = &getContext();
 
     // Set up type converter
@@ -248,28 +258,21 @@ struct PixelToLLVMLoweringPass
                  GrayscaleOpLowering, RotateOpLowering>(typeConverter);
 
     // Add function signature conversion
-    populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(patterns,
-                                                                    typeConverter);
+    populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
+        patterns, typeConverter);
 
     // Apply conversion
-    if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
+    if (failed(applyPartialConversion(module, target, std::move(patterns))))
       signalPassFailure();
-    }
   }
 };
-
 } // namespace
 
 //===----------------------------------------------------------------------===//
 // Pass Registration
 //===----------------------------------------------------------------------===//
-
-namespace mlir {
-namespace pixel {
-
-std::unique_ptr<Pass> createPixelToLLVMLoweringPass() {
-  return std::make_unique<PixelToLLVMLoweringPass>();
+namespace mlir::pixel {
+unique_ptr<Pass> createPixelToLLVMLoweringPass() {
+  return make_unique<PixelToLLVMLoweringPass>();
 }
-
-} // namespace pixel
-} // namespace mlir
+} // namespace mlir::pixel

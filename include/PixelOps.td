@@ -3,7 +3,6 @@
 // Defines the Pixel dialect operations for image processing
 //
 //===--------------------------------------------------------------===//
-
 #ifndef PIXEL_OPS
 #define PIXEL_OPS
 
@@ -19,6 +18,7 @@ def Pixel_Dialect : Dialect {
     including loading, saving, and transforming images.
   }];
   let cppNamespace = "::mlir::pixel";
+  let useDefaultTypePrinterParser = 1;
 }
 
 // Base class for Pixel dialect ops

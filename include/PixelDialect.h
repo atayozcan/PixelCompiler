@@ -2,28 +2,23 @@
 // Defines the Pixel dialect for image processing operations
 //===----------------------------------------------------------------------===//
 #pragma once
+#include "mlir/Bytecode/BytecodeOpInterface.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/OpDefinition.h"
-#include "mlir/Bytecode/BytecodeOpInterface.h"
-#include "mlir/Interfaces/InferTypeOpInterface.h"
-#include "mlir/Interfaces/SideEffectInterfaces.h"
 
 namespace mlir::pixel {
-  //===----------------------------------------------------------------------===//
-  // ImageType - Custom type for representing images
-  //===----------------------------------------------------------------------===//
+//===----------------------------------------------------------------------===//
+// ImageType - Custom type for representing images
+//===----------------------------------------------------------------------===//
+class ImageType : public Type::TypeBase<ImageType, Type, TypeStorage> {
+public:
+  using Base::Base;
 
-  class ImageType : public Type::TypeBase<ImageType, Type, TypeStorage> {
-  public:
-    using Base::Base;
+  static constexpr StringLiteral name = "pixel.image";
 
-    static constexpr StringLiteral name = "pixel.image";
-
-    static ImageType get(MLIRContext *context) {
-      return Base::get(context);
-    }
-  };
-}
+  static ImageType get(MLIRContext *context) { return Base::get(context); }
+};
+} // namespace mlir::pixel
 
 // Include the generated dialect declarations
 #include "PixelOpsDialect.h.inc"

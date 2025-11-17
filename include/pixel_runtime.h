@@ -3,24 +3,21 @@
 //===----------------------------------------------------------------------===//
 #pragma once
 #include <cstdint>
-#include <cstdlib>
 
 extern "C" {
 //===----------------------------------------------------------------------===//
 // Image Structure
 //===----------------------------------------------------------------------===//
-
 typedef struct {
-    uint32_t width;
-    uint32_t height;
-    uint32_t channels; // 1=grayscale, 3=RGB, 4=RGBA
-    uint8_t *data;
+  uint32_t width;
+  uint32_t height;
+  uint32_t channels; // 1=grayscale, 3=RGB, 4=RGBA
+  uint8_t *data;
 } PixelImage;
 
 //===----------------------------------------------------------------------===//
 // Image I/O Functions
 //===----------------------------------------------------------------------===//
-
 // Load an image from file (supports BMP, PNG, JPG)
 PixelImage *pixel_load_image(const char *filepath);
 

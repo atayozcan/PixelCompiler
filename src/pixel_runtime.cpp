@@ -3,20 +3,17 @@
 // Implementation of runtime support for BMP image processing
 //
 //===----------------------------------------------------------------------===//
-
 #include "pixel_runtime.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <algorithm>
 
 extern "C" {
-
 //===----------------------------------------------------------------------===//
 // BMP File Format Structures
 //===----------------------------------------------------------------------===//
-
 #pragma pack(push, 1)
 typedef struct {
   uint16_t type;      // Magic identifier: 0x4d42
@@ -44,39 +41,39 @@ typedef struct {
 //===----------------------------------------------------------------------===//
 // Utility Functions
 //===----------------------------------------------------------------------===//
-
-PixelImage *pixel_create_image(uint32_t width, uint32_t height, uint32_t channels) {
-  PixelImage *img = (PixelImage *)malloc(sizeof(PixelImage));
+PixelImage *pixel_create_image(const uint32_t width, const uint32_t height,
+                               const uint32_t channels) {
+  const auto img = static_cast<PixelImage *>(malloc(sizeof(PixelImage)));
   if (!img)
     return nullptr;
 
   img->width = width;
   img->height = height;
   img->channels = channels;
-  img->data = (uint8_t *)calloc(width * height * channels, sizeof(uint8_t));
+  img->data = static_cast<uint8_t *>(
+      calloc(width * height * channels, sizeof(uint8_t)));
 
   if (!img->data) {
     free(img);
     return nullptr;
   }
-
   return img;
 }
 
 void pixel_free_image(PixelImage *img) {
-  if (img) {
-    if (img->data) {
-      free(img->data);
-    }
-    free(img);
-  }
+  if (!img)
+    return;
+  if (img->data)
+    free(img->data);
+  free(img);
 }
 
 PixelImage *pixel_clone_image(const PixelImage *img) {
   if (!img)
     return nullptr;
 
-  PixelImage *clone = pixel_create_image(img->width, img->height, img->channels);
+  PixelImage *clone =
+      pixel_create_image(img->width, img->height, img->channels);
   if (!clone)
     return nullptr;
 
@@ -87,7 +84,6 @@ PixelImage *pixel_clone_image(const PixelImage *img) {
 //===----------------------------------------------------------------------===//
 // BMP I/O Functions
 //===----------------------------------------------------------------------===//
-
 PixelImage *pixel_load_image(const char *filepath) {
   FILE *file = fopen(filepath, "rb");
   if (!file) {
@@ -126,8 +122,8 @@ PixelImage *pixel_load_image(const char *filepath) {
   }
 
   // Create image structure
-  uint32_t width = infoHeader.width;
-  uint32_t height = abs(infoHeader.height);
+  const uint32_t width = infoHeader.width;
+  const uint32_t height = abs(infoHeader.height);
   PixelImage *img = pixel_create_image(width, height, 3);
   if (!img) {
     fclose(file);
@@ -138,8 +134,8 @@ PixelImage *pixel_load_image(const char *filepath) {
   fseek(file, header.offset, SEEK_SET);
 
   // BMP rows are padded to 4-byte boundaries
-  uint32_t row_size = ((width * 3 + 3) / 4) * 4;
-  uint8_t *row = (uint8_t *)malloc(row_size);
+  const uint32_t row_size = (width * 3 + 3) / 4 * 4;
+  const auto row = static_cast<uint8_t *>(malloc(row_size));
 
   // Read pixel data (BMP stores bottom-to-top, BGR format)
   for (int32_t y = height - 1; y >= 0; y--) {
@@ -153,7 +149,7 @@ PixelImage *pixel_load_image(const char *filepath) {
 
     // Convert BGR to RGB
     for (uint32_t x = 0; x < width; x++) {
-      uint32_t idx = (y * width + x) * 3;
+      const uint32_t idx = (y * width + x) * 3;
       img->data[idx + 0] = row[x * 3 + 2]; // R
       img->data[idx + 1] = row[x * 3 + 1]; // G
       img->data[idx + 2] = row[x * 3 + 0]; // B
@@ -165,7 +161,8 @@ PixelImage *pixel_load_image(const char *filepath) {
   return img;
 }
 
-int pixel_save_image(const PixelImage *img, const char *filepath, const char *format) {
+int pixel_save_image(const PixelImage *img, const char *filepath,
+                     const char *format) {
   if (!img || !filepath)
     return -1;
 
@@ -182,8 +179,8 @@ int pixel_save_image(const PixelImage *img, const char *filepath, const char *fo
   }
 
   // Calculate padding
-  uint32_t row_size = ((img->width * 3 + 3) / 4) * 4;
-  uint32_t image_size = row_size * img->height;
+  const uint32_t row_size = (img->width * 3 + 3) / 4 * 4;
+  const uint32_t image_size = row_size * img->height;
 
   // Prepare headers
   BMPHeader header;
@@ -211,15 +208,17 @@ int pixel_save_image(const PixelImage *img, const char *filepath, const char *fo
   fwrite(&infoHeader, sizeof(BMPInfoHeader), 1, file);
 
   // Write pixel data (bottom-to-top, BGR format)
-  uint8_t *row = (uint8_t *)calloc(row_size, 1);
+  const auto row = static_cast<uint8_t *>(calloc(row_size, 1));
 
   for (int32_t y = img->height - 1; y >= 0; y--) {
     // Convert RGB to BGR
     for (uint32_t x = 0; x < img->width; x++) {
-      uint32_t idx = (y * img->width + x) * img->channels;
-      row[x * 3 + 0] = (img->channels >= 3) ? img->data[idx + 2] : img->data[idx]; // B
-      row[x * 3 + 1] = (img->channels >= 2) ? img->data[idx + 1] : img->data[idx]; // G
-      row[x * 3 + 2] = img->data[idx + 0];                                          // R
+      const uint32_t idx = (y * img->width + x) * img->channels;
+      row[x * 3 + 0] =
+          img->channels >= 3 ? img->data[idx + 2] : img->data[idx]; // B
+      row[x * 3 + 1] =
+          img->channels >= 2 ? img->data[idx + 1] : img->data[idx]; // G
+      row[x * 3 + 2] = img->data[idx + 0];                          // R
     }
     fwrite(row, 1, row_size, file);
   }
@@ -232,7 +231,6 @@ int pixel_save_image(const PixelImage *img, const char *filepath, const char *fo
 //===----------------------------------------------------------------------===//
 // Image Processing Functions
 //===----------------------------------------------------------------------===//
-
 PixelImage *pixel_invert(const PixelImage *img) {
   if (!img)
     return nullptr;
@@ -241,11 +239,9 @@ PixelImage *pixel_invert(const PixelImage *img) {
   if (!result)
     return nullptr;
 
-  uint32_t total_pixels = img->width * img->height * img->channels;
-  for (uint32_t i = 0; i < total_pixels; i++) {
+  const uint32_t total_pixels = img->width * img->height * img->channels;
+  for (uint32_t i = 0; i < total_pixels; i++)
     result->data[i] = 255 - img->data[i];
-  }
-
   return result;
 }
 
@@ -263,21 +259,21 @@ PixelImage *pixel_grayscale(const PixelImage *img) {
 
   for (uint32_t y = 0; y < img->height; y++) {
     for (uint32_t x = 0; x < img->width; x++) {
-      uint32_t idx = (y * img->width + x) * img->channels;
-      uint8_t r = img->data[idx + 0];
-      uint8_t g = img->data[idx + 1];
-      uint8_t b = img->data[idx + 2];
+      const uint32_t idx = (y * img->width + x) * img->channels;
+      const uint8_t r = img->data[idx + 0];
+      const uint8_t g = img->data[idx + 1];
+      const uint8_t b = img->data[idx + 2];
 
       // Luminosity method: 0.299*R + 0.587*G + 0.114*B
-      uint8_t gray = (uint8_t)(0.299f * r + 0.587f * g + 0.114f * b);
+      const uint8_t gray =
+          static_cast<uint8_t>(0.299f * r + 0.587f * g + 0.114f * b);
 
-      uint32_t out_idx = (y * result->width + x) * 3;
+      const uint32_t out_idx = (y * result->width + x) * 3;
       result->data[out_idx + 0] = gray;
       result->data[out_idx + 1] = gray;
       result->data[out_idx + 2] = gray;
     }
   }
-
   return result;
 }
 
@@ -292,93 +288,91 @@ PixelImage *pixel_rotate(const PixelImage *img, float angle) {
     angle -= 360.0f;
 
   // Handle 90-degree rotations specially for better quality
-  if (fabs(angle - 0.0f) < 0.1f) {
+  if (fabs(angle - 0.0f) < 0.1f)
     return pixel_clone_image(img);
-  } else if (fabs(angle - 90.0f) < 0.1f) {
+  if (fabs(angle - 90.0f) < 0.1f) {
     // Rotate 90 degrees clockwise
-    PixelImage *result = pixel_create_image(img->height, img->width, img->channels);
+    PixelImage *result =
+        pixel_create_image(img->height, img->width, img->channels);
     if (!result)
       return nullptr;
-
-    for (uint32_t y = 0; y < img->height; y++) {
+    for (uint32_t y = 0; y < img->height; y++)
       for (uint32_t x = 0; x < img->width; x++) {
-        uint32_t src_idx = (y * img->width + x) * img->channels;
-        uint32_t dst_idx = (x * result->width + (img->height - 1 - y)) * img->channels;
-
-        for (uint32_t c = 0; c < img->channels; c++) {
+        const uint32_t src_idx = (y * img->width + x) * img->channels;
+        const uint32_t dst_idx =
+            (x * result->width + (img->height - 1 - y)) * img->channels;
+        for (uint32_t c = 0; c < img->channels; c++)
           result->data[dst_idx + c] = img->data[src_idx + c];
-        }
       }
-    }
     return result;
-  } else if (fabs(angle - 180.0f) < 0.1f) {
+  }
+  if (fabs(angle - 180.0f) < 0.1f) {
     // Rotate 180 degrees
-    PixelImage *result = pixel_create_image(img->width, img->height, img->channels);
+    PixelImage *result =
+        pixel_create_image(img->width, img->height, img->channels);
     if (!result)
       return nullptr;
 
-    for (uint32_t y = 0; y < img->height; y++) {
+    for (uint32_t y = 0; y < img->height; y++)
       for (uint32_t x = 0; x < img->width; x++) {
-        uint32_t src_idx = (y * img->width + x) * img->channels;
-        uint32_t dst_idx = ((img->height - 1 - y) * img->width + (img->width - 1 - x)) * img->channels;
-
-        for (uint32_t c = 0; c < img->channels; c++) {
+        const uint32_t src_idx = (y * img->width + x) * img->channels;
+        const uint32_t dst_idx =
+            ((img->height - 1 - y) * img->width + (img->width - 1 - x)) *
+            img->channels;
+        for (uint32_t c = 0; c < img->channels; c++)
           result->data[dst_idx + c] = img->data[src_idx + c];
-        }
       }
-    }
     return result;
-  } else if (fabs(angle - 270.0f) < 0.1f) {
+  }
+  if (fabs(angle - 270.0f) < 0.1f) {
     // Rotate 270 degrees clockwise (90 counter-clockwise)
-    PixelImage *result = pixel_create_image(img->height, img->width, img->channels);
+    PixelImage *result =
+        pixel_create_image(img->height, img->width, img->channels);
     if (!result)
       return nullptr;
-
-    for (uint32_t y = 0; y < img->height; y++) {
+    for (uint32_t y = 0; y < img->height; y++)
       for (uint32_t x = 0; x < img->width; x++) {
-        uint32_t src_idx = (y * img->width + x) * img->channels;
-        uint32_t dst_idx = ((img->width - 1 - x) * result->width + y) * img->channels;
-
-        for (uint32_t c = 0; c < img->channels; c++) {
+        const uint32_t src_idx = (y * img->width + x) * img->channels;
+        const uint32_t dst_idx =
+            ((img->width - 1 - x) * result->width + y) * img->channels;
+        for (uint32_t c = 0; c < img->channels; c++)
           result->data[dst_idx + c] = img->data[src_idx + c];
-        }
       }
-    }
     return result;
   }
 
   // For arbitrary angles, use rotation matrix
   // This is a simplified implementation - just return a copy for now
-  fprintf(stderr, "Warning: Arbitrary angle rotation not fully implemented, angle=%.2f\n", angle);
+  fprintf(
+      stderr,
+      "Warning: Arbitrary angle rotation not fully implemented, angle=%.2f\n",
+      angle);
   return pixel_clone_image(img);
 }
 
 //===----------------------------------------------------------------------===//
 // Runtime C Interface for MLIR (using void* for PixelImage*)
 //===----------------------------------------------------------------------===//
-
-void *_pixel_load(const char *filepath) {
-  return pixel_load_image(filepath);
-}
+void *_pixel_load(const char *filepath) { return pixel_load_image(filepath); }
 
 void _pixel_save(void *img, const char *filepath) {
-  pixel_save_image((PixelImage *)img, filepath, "bmp");
+  pixel_save_image(static_cast<PixelImage *>(img), filepath, "bmp");
 }
 
 void *_pixel_invert(void *img) {
-  return pixel_invert((PixelImage *)img);
+  return pixel_invert(static_cast<PixelImage *>(img));
 }
 
 void *_pixel_grayscale(void *img) {
-  return pixel_grayscale((PixelImage *)img);
+  return pixel_grayscale(static_cast<PixelImage *>(img));
 }
 
-void *_pixel_rotate(void *img, float angle) {
-  return pixel_rotate((PixelImage *)img, angle);
+void *_pixel_rotate(void *img, const float angle) {
+  return pixel_rotate(static_cast<PixelImage *>(img), angle);
 }
 
 void _pixel_free(void *img) {
-  pixel_free_image((PixelImage *)img);
+  pixel_free_image(static_cast<PixelImage *>(img));
 }
 
 } // extern "C"
