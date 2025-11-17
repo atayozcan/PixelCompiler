@@ -1,0 +1,5 @@
+/llvm/*
+.claude
+.idea
+build
+cmake-build-default

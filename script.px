@@ -1,0 +1,12 @@
+# Pixel Language
+#   Eine DSL für Bildverarbeitung.
+#   Funktionen:
+#    * Zurzeit nur 24-Bit-Bitmap Dateien sind unterstützt
+#    * Implizites Laden und Speichern nachdem jeden "operations"-Block
+
+image img1 "input" -> "output" as bmp
+
+operations img1:
+  invert
+  grayscale
+  rotate
