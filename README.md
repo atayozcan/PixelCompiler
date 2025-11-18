@@ -58,17 +58,3 @@ operations img1:
   grayscale
   rotate 90
 ```
-
-## Key Simplifications
-
-This is a presentation-friendly version with:
-- No command-line flags - just provide the input file
-- Automatic output of all IR levels
-- Combined source files for easier understanding
-- Simplified build system
-- Clear, linear compilation flow
-
-Perfect for demonstrating:
-- Custom MLIR dialect design
-- High-level to low-level IR lowering
-- Integration with LLVM infrastructure
