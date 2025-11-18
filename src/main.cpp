@@ -1,6 +1,6 @@
-//===- main.cpp - Pixel Compiler Driver ---------------------------------===//
+//===- main.cpp - Pixel Compiler -----------------------------------------===//
 //
-// Main driver for the Pixel image processing DSL compiler
+// Simple compiler for Pixel image processing DSL
 //
 //===----------------------------------------------------------------------===//
 #include "PixelDialect.h"
@@ -12,161 +12,119 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Verifier.h"
-#include "mlir/InitAllDialects.h"
 #include "mlir/Pass/PassManager.h"
-#include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
-#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
-#include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Transforms/Passes.h"
-#include "pixel_frontend.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/TargetSelect.h"
+#include "../include/pixel_frontend.h"
 #include "llvm/Support/raw_ostream.h"
 #include <fstream>
 using namespace mlir;
-using namespace llvm;
 using namespace pixel;
 using namespace std;
-using namespace cl;
+using llvm::outs;
+using llvm::errs;
+using llvm::raw_string_ostream;
 
-static opt<string> inputFilename(Positional, desc("<input .px file>"),
-                                 init("-"), value_desc("filename"));
-
-static opt<bool> dumpHighLevelMLIR("dump-high-level",
-                                   desc("Dump high-level Pixel MLIR"),
-                                   init(false));
-
-static opt<bool> dumpLowLevelMLIR("dump-low-level",
-                                  desc("Dump lowered standard MLIR"),
-                                  init(false));
-
-static opt<bool> dumpLLVM("dump-llvm", desc("Dump LLVM IR"), init(false));
-
-static opt<bool> dumpAll("dump-all",
-                         desc("Dump all intermediate representations"),
-                         init(false));
-
-/// Load a .px script file into a string
-static string loadFile(const string &filename) {
+string loadFile(const string &filename) {
   ifstream file(filename);
   if (!file.is_open()) {
     errs() << "Error: Cannot open file '" << filename << "'\n";
-    exit(EXIT_FAILURE);
+    exit(1);
   }
-  string content((istreambuf_iterator<char>(file)),
-                 istreambuf_iterator<char>());
-  return content;
+  return {(istreambuf_iterator<char>(file)), istreambuf_iterator<char>()};
 }
 
-/// Run complete lowering pipeline from Pixel to LLVM dialect
-LogicalResult lowerToLLVMDialect(ModuleOp module) {
-  PassManager pm(module.getContext());
-
-  // Lower Pixel dialect to LLVM dialect with runtime calls
-  pm.addPass(createPixelToLLVMLoweringPass());
-  // Convert Arith dialect operations to LLVM
-  pm.addPass(createArithToLLVMConversionPass());
-  // Convert remaining Func dialect operations to LLVM
-  pm.addPass(createConvertFuncToLLVMPass());
-  // Reconcile unrealized casts
-  pm.addPass(createReconcileUnrealizedCastsPass());
-  // Canonicalization
-  pm.addPass(createCanonicalizerPass());
-
-  if (failed(pm.run(module)))
-    return failure();
-  return success();
+void writeToFile(const string &filename, const string &content) {
+  if (ofstream file(filename); file.is_open()) {
+    file << content;
+    return;
+  }
+  errs() << "Error: Cannot write to file '" << filename << "'\n";
+  exit(EXIT_FAILURE);
 }
 
-int main(const int argc, char **argv) {
-  // Register MLIR command line options
-  registerAsmPrinterCLOptions();
-  registerMLIRContextCLOptions();
-  registerPassManagerCLOptions();
+int main(int argc, char **argv) {
+  if (argc != 2) {
+    errs() << "Usage: " << argv[0] << " <input.px>\n";
+    return 1;
+  }
 
-  ParseCommandLineOptions(argc, argv, "Pixel compiler\n");
+  auto inputFile = argv[1];
 
-  // Initialize LLVM
-  InitializeNativeTarget();
-  InitializeNativeTargetAsmPrinter();
+  // Create MLIR context with all necessary dialects
+  MLIRContext context;
+  context.getOrLoadDialect<PixelDialect>();
+  context.getOrLoadDialect<func::FuncDialect>();
+  context.getOrLoadDialect<arith::ArithDialect>();
+  context.getOrLoadDialect<memref::MemRefDialect>();
+  context.getOrLoadDialect<LLVM::LLVMDialect>();
 
-  // Create MLIR context
-  DialectRegistry registry;
-  registry.insert<PixelDialect, func::FuncDialect, arith::ArithDialect,
-                  memref::MemRefDialect, LLVM::LLVMDialect>();
+  // Parse .px script
+  outs() << "[1/5] Parsing Pixel script...\n";
+  auto module = parsePixelScript(loadFile(inputFile), context);
 
-  // Register LLVM IR translation for dialects we use
-  registerLLVMDialectTranslation(registry);
-  registerBuiltinDialectTranslation(registry);
-
-  MLIRContext context(registry);
-  context.loadAllAvailableDialects();
-
-  // Read input file
-  const auto scriptText = loadFile(inputFilename);
-
-  // Parse .px script into high-level MLIR
-  outs() << "Parsing Pixel script...\n";
-  auto module = parsePixelScript(scriptText, context);
-
-  if (!module) {
-    errs() << "Error: Failed to parse Pixel script\n";
+  if (!module || failed(verify(*module))) {
+    errs() << "Error: Failed to parse or verify script\n";
     return EXIT_FAILURE;
   }
 
-  // Verify the module
-  if (failed(verify(*module))) {
-    errs() << "Error: Module verification failed\n";
-    module->dump();
-    return EXIT_FAILURE;
-  }
-
-  // Dump high-level MLIR (Pixel dialect)
-  if (dumpHighLevelMLIR || dumpAll) {
-    outs() << "\n=== High-Level MLIR (Pixel Dialect) ===\n";
-    module->print(outs());
-    outs() << "\n";
-  }
+  // Save high-level MLIR
+  outs() << "[2/5] Generating high-level MLIR...\n";
+  string highLevelMLIR;
+  raw_string_ostream highLevelStream(highLevelMLIR);
+  module->print(highLevelStream);
+  writeToFile("output_high_level.mlir", highLevelMLIR);
 
   // Lower to LLVM dialect
-  outs() << "Lowering to LLVM dialect...\n";
-  if (failed(lowerToLLVMDialect(*module))) {
+  outs() << "[3/5] Lowering to LLVM dialect...\n";
+  PassManager pm(module->getContext());
+  pm.addPass(createPixelToLLVMLoweringPass());
+  pm.addPass(createArithToLLVMConversionPass());
+  pm.addPass(createConvertFuncToLLVMPass());
+  pm.addPass(createReconcileUnrealizedCastsPass());
+  pm.addPass(createCanonicalizerPass());
+
+  if (failed(pm.run(*module))) {
     errs() << "Error: Failed to lower to LLVM dialect\n";
     return EXIT_FAILURE;
   }
 
-  // Dump low-level MLIR (after lowering to LLVM dialect)
-  if (dumpLowLevelMLIR || dumpAll) {
-    outs() << "\n=== Low-Level MLIR (LLVM Dialect) ===\n";
-    module->print(outs());
-    outs() << "\n";
-  }
+  // Save low-level MLIR
+  string lowLevelMLIR;
+  raw_string_ostream lowLevelStream(lowLevelMLIR);
+  module->print(lowLevelStream);
+  writeToFile("output_low_level.mlir", lowLevelMLIR);
 
-  // Convert to LLVM IR
-  LLVMContext llvmContext;
-  const auto llvmModule = translateModuleToLLVMIR(*module, llvmContext);
+  // Generate LLVM IR
+  outs() << "[4/5] Generating LLVM IR...\n";
+  int result = system(
+    "command -v mlir-translate >/dev/null 2>&1 && mlir-translate --mlir-to-llvmir output_low_level.mlir -o output.ll 2>/dev/null || "
+    "../llvm/bin/mlir-translate --mlir-to-llvmir output_low_level.mlir -o output.ll 2>/dev/null || "
+    "llvm/bin/mlir-translate --mlir-to-llvmir output_low_level.mlir -o output.ll 2>/dev/null");
 
-  if (!llvmModule) {
-    errs() << "Error: Failed to convert to LLVM IR\n";
+  if (result != 0) {
+    errs() << "Error: Failed to generate LLVM IR (mlir-translate not found)\n";
     return EXIT_FAILURE;
   }
 
-  // Dump LLVM IR
-  if (dumpLLVM || dumpAll) {
-    outs() << "\n=== LLVM IR ===\n";
-    llvmModule->print(outs(), nullptr);
-    outs() << "\n";
+  // Compile to executable
+  outs() << "[5/5] Compiling to executable...\n";
+  result = system("clang++ -c src/pixel_runtime.cpp -Iinclude -o pixel_runtime.o 2>/dev/null && "
+    "clang++ output.ll pixel_runtime.o -o pixel_program -lm 2>/dev/null");
+
+  if (result != 0) {
+    errs() << "Error: Failed to compile executable\n";
+    return EXIT_FAILURE;
   }
 
-  outs() << "\nCompilation pipeline completed successfully!\n";
-  outs() << "Generated LLVM IR can be compiled to an executable using:\n";
-  outs() << "  llc output.ll -o output.s\n";
-  outs() << "  clang output.s -L. -lPixelRuntime -o pixel_program\n";
+  outs() << "\nSuccess! Generated:\n";
+  outs() << "  output_high_level.mlir - High-level Pixel dialect MLIR\n";
+  outs() << "  output_low_level.mlir  - Low-level LLVM dialect MLIR\n";
+  outs() << "  output.ll              - LLVM IR\n";
+  outs() << "  pixel_program          - Executable\n\n";
+  outs() << "Run with: ./pixel_program\n";
+
   return EXIT_SUCCESS;
 }

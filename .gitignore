@@ -1,5 +1,20 @@
+# LLVM installation
 /llvm/*
+
+# IDE and editor
 .claude
 .idea
-build
-cmake-build-default
+
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# Generated outputs
+output_high_level.mlir
+output_low_level.mlir
+output.ll
+pixel_program
+pixel_runtime.o
+*.bmp
+!input.bmp
