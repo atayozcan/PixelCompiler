@@ -3,7 +3,7 @@
 // Implementation of runtime support for BMP image processing
 //
 //===----------------------------------------------------------------------===//
-#include "pixel_runtime.h"
+#include "../include/pixel_runtime.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -16,24 +16,24 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 #pragma pack(push, 1)
 typedef struct {
-  uint16_t type;      // Magic identifier: 0x4d42
-  uint32_t size;      // File size in bytes
+  uint16_t type; // Magic identifier: 0x4d42
+  uint32_t size; // File size in bytes
   uint16_t reserved1; // Not used
   uint16_t reserved2; // Not used
-  uint32_t offset;    // Offset to image data in bytes
+  uint32_t offset; // Offset to image data in bytes
 } BMPHeader;
 
 typedef struct {
-  uint32_t size;            // Header size in bytes
-  int32_t width;            // Width of the image
-  int32_t height;           // Height of the image
-  uint16_t planes;          // Number of color planes
-  uint16_t bits;            // Bits per pixel
-  uint32_t compression;     // Compression type
-  uint32_t imagesize;       // Image size in bytes
-  int32_t xresolution;      // Pixels per meter
-  int32_t yresolution;      // Pixels per meter
-  uint32_t ncolors;         // Number of colors
+  uint32_t size; // Header size in bytes
+  int32_t width; // Width of the image
+  int32_t height; // Height of the image
+  uint16_t planes; // Number of color planes
+  uint16_t bits; // Bits per pixel
+  uint32_t compression; // Compression type
+  uint32_t imagesize; // Image size in bytes
+  int32_t xresolution; // Pixels per meter
+  int32_t yresolution; // Pixels per meter
+  uint32_t ncolors; // Number of colors
   uint32_t importantcolors; // Important colors
 } BMPInfoHeader;
 #pragma pack(pop)
@@ -51,7 +51,7 @@ PixelImage *pixel_create_image(const uint32_t width, const uint32_t height,
   img->height = height;
   img->channels = channels;
   img->data = static_cast<uint8_t *>(
-      calloc(width * height * channels, sizeof(uint8_t)));
+    calloc(width * height * channels, sizeof(uint8_t)));
 
   if (!img->data) {
     free(img);
@@ -218,7 +218,7 @@ int pixel_save_image(const PixelImage *img, const char *filepath,
           img->channels >= 3 ? img->data[idx + 2] : img->data[idx]; // B
       row[x * 3 + 1] =
           img->channels >= 2 ? img->data[idx + 1] : img->data[idx]; // G
-      row[x * 3 + 2] = img->data[idx + 0];                          // R
+      row[x * 3 + 2] = img->data[idx + 0]; // R
     }
     fwrite(row, 1, row_size, file);
   }
@@ -344,9 +344,9 @@ PixelImage *pixel_rotate(const PixelImage *img, float angle) {
   // For arbitrary angles, use rotation matrix
   // This is a simplified implementation - just return a copy for now
   fprintf(
-      stderr,
-      "Warning: Arbitrary angle rotation not fully implemented, angle=%.2f\n",
-      angle);
+    stderr,
+    "Warning: Arbitrary angle rotation not fully implemented, angle=%.2f\n",
+    angle);
   return pixel_clone_image(img);
 }
 
@@ -374,5 +374,4 @@ void *_pixel_rotate(void *img, const float angle) {
 void _pixel_free(void *img) {
   pixel_free_image(static_cast<PixelImage *>(img));
 }
-
 } // extern "C"
