@@ -31,7 +31,7 @@ string loadFile(const string &filename) {
   ifstream file(filename);
   if (!file.is_open()) {
     errs() << "Error: Cannot open file '" << filename << "'\n";
-    exit(1);
+    exit(EXIT_FAILURE);
   }
   return {(istreambuf_iterator<char>(file)), istreambuf_iterator<char>()};
 }
@@ -104,7 +104,7 @@ int main(int argc, char **argv) {
     "../llvm/bin/mlir-translate --mlir-to-llvmir output_low_level.mlir -o output.ll 2>/dev/null || "
     "llvm/bin/mlir-translate --mlir-to-llvmir output_low_level.mlir -o output.ll 2>/dev/null");
 
-  if (result != 0) {
+  if (result != EXIT_SUCCESS) {
     errs() << "Error: Failed to generate LLVM IR (mlir-translate not found)\n";
     return EXIT_FAILURE;
   }
@@ -114,7 +114,7 @@ int main(int argc, char **argv) {
   result = system("clang++ -c src/pixel_runtime.cpp -Iinclude -o pixel_runtime.o 2>/dev/null && "
     "clang++ output.ll pixel_runtime.o -o pixel_program -lm 2>/dev/null");
 
-  if (result != 0) {
+  if (result != EXIT_SUCCESS) {
     errs() << "Error: Failed to compile executable\n";
     return EXIT_FAILURE;
   }

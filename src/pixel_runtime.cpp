@@ -85,7 +85,7 @@ PixelImage *pixel_clone_image(const PixelImage *img) {
 // BMP I/O Functions
 //===----------------------------------------------------------------------===//
 PixelImage *pixel_load_image(const char *filepath) {
-  FILE *file = fopen(filepath, "rb");
+  auto *file = fopen(filepath, "rb");
   if (!file) {
     fprintf(stderr, "Error: Cannot open file '%s'\n", filepath);
     return nullptr;
@@ -122,8 +122,7 @@ PixelImage *pixel_load_image(const char *filepath) {
   }
 
   // Create image structure
-  const uint32_t width = infoHeader.width;
-  const uint32_t height = abs(infoHeader.height);
+  const uint32_t width = infoHeader.width, height = abs(infoHeader.height);
   PixelImage *img = pixel_create_image(width, height, 3);
   if (!img) {
     fclose(file);
@@ -164,23 +163,22 @@ PixelImage *pixel_load_image(const char *filepath) {
 int pixel_save_image(const PixelImage *img, const char *filepath,
                      const char *format) {
   if (!img || !filepath)
-    return -1;
+    return EXIT_FAILURE;
 
   // Only support BMP for now
-  if (strcmp(format, "bmp") != 0) {
+  if (strcmp(format, "bmp")) {
     fprintf(stderr, "Error: Only BMP format is currently supported\n");
-    return -1;
+    return EXIT_FAILURE;
   }
 
-  FILE *file = fopen(filepath, "wb");
+  auto *file = fopen(filepath, "wb");
   if (!file) {
     fprintf(stderr, "Error: Cannot create file '%s'\n", filepath);
-    return -1;
+    return EXIT_FAILURE;
   }
 
   // Calculate padding
-  const uint32_t row_size = (img->width * 3 + 3) / 4 * 4;
-  const uint32_t image_size = row_size * img->height;
+  const uint32_t row_size = (img->width * 3 + 3) / 4 * 4, image_size = row_size * img->height;
 
   // Prepare headers
   BMPHeader header;
@@ -225,7 +223,7 @@ int pixel_save_image(const PixelImage *img, const char *filepath,
 
   free(row);
   fclose(file);
-  return 0;
+  return EXIT_SUCCESS;
 }
 
 //===----------------------------------------------------------------------===//
@@ -257,23 +255,20 @@ PixelImage *pixel_grayscale(const PixelImage *img) {
   if (!result)
     return nullptr;
 
-  for (uint32_t y = 0; y < img->height; y++) {
+  for (uint32_t y = 0; y < img->height; y++)
     for (uint32_t x = 0; x < img->width; x++) {
       const uint32_t idx = (y * img->width + x) * img->channels;
-      const uint8_t r = img->data[idx + 0];
-      const uint8_t g = img->data[idx + 1];
-      const uint8_t b = img->data[idx + 2];
+      const uint8_t r = img->data[idx + 0], g = img->data[idx + 1], b = img->data[idx + 2];
 
       // Luminosity method: 0.299*R + 0.587*G + 0.114*B
       const uint8_t gray =
-          static_cast<uint8_t>(0.299f * r + 0.587f * g + 0.114f * b);
+          static_cast<uint8_t>(.299 * r + .587 * g + .114 * b);
 
       const uint32_t out_idx = (y * result->width + x) * 3;
       result->data[out_idx + 0] = gray;
       result->data[out_idx + 1] = gray;
       result->data[out_idx + 2] = gray;
     }
-  }
   return result;
 }
 
@@ -283,14 +278,14 @@ PixelImage *pixel_rotate(const PixelImage *img, float angle) {
 
   // Normalize angle to 0-360
   while (angle < 0)
-    angle += 360.0f;
-  while (angle >= 360.0f)
-    angle -= 360.0f;
+    angle += 360;
+  while (angle >= 360)
+    angle -= 360;
 
   // Handle 90-degree rotations specially for better quality
-  if (fabs(angle - 0.0f) < 0.1f)
+  if (fabs(angle) < .1)
     return pixel_clone_image(img);
-  if (fabs(angle - 90.0f) < 0.1f) {
+  if (fabs(angle - 90) < .1) {
     // Rotate 90 degrees clockwise
     PixelImage *result =
         pixel_create_image(img->height, img->width, img->channels);
@@ -306,7 +301,7 @@ PixelImage *pixel_rotate(const PixelImage *img, float angle) {
       }
     return result;
   }
-  if (fabs(angle - 180.0f) < 0.1f) {
+  if (fabs(angle - 180) < .1) {
     // Rotate 180 degrees
     PixelImage *result =
         pixel_create_image(img->width, img->height, img->channels);
@@ -324,7 +319,7 @@ PixelImage *pixel_rotate(const PixelImage *img, float angle) {
       }
     return result;
   }
-  if (fabs(angle - 270.0f) < 0.1f) {
+  if (fabs(angle - 270) < .1) {
     // Rotate 270 degrees clockwise (90 counter-clockwise)
     PixelImage *result =
         pixel_create_image(img->height, img->width, img->channels);
