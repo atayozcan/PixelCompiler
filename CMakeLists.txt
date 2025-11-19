@@ -4,14 +4,13 @@ set(CMAKE_CXX_COMPILER clang++)
 project(PixelCompiler LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-add_compile_options(-fno-rtti -stdlib=libc++)
-add_link_options(-fuse-ld=lld -stdlib=libc++ -lc++abi)
+add_compile_options(-fno-rtti)
+add_link_options(-fuse-ld=lld)
 
 find_library(ZSTD_LIB zstd REQUIRED)
 add_library(zstd::libzstd_static UNKNOWN IMPORTED)
 set_target_properties(zstd::libzstd_static PROPERTIES IMPORTED_LOCATION "${ZSTD_LIB}")
 
-set(MLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/llvm/lib/cmake/mlir")
 find_package(MLIR REQUIRED CONFIG)
 list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}" "${LLVM_CMAKE_DIR}")
 
@@ -45,7 +44,9 @@ target_link_libraries(PixelDialect PUBLIC
 
 add_executable(pixel_compiler src/main.cpp src/pixel_frontend.cpp)
 
-llvm_map_components_to_libnames(llvm_libs Support Core X86CodeGen X86AsmParser X86Desc X86Info)
+execute_process(COMMAND llvm-config --libs
+        OUTPUT_VARIABLE llvm_libs
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 target_link_libraries(pixel_compiler PRIVATE
         PixelDialect
