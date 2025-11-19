@@ -3,55 +3,111 @@
 // Simple compiler for Pixel image processing DSL
 //
 //===----------------------------------------------------------------------===//
-#include "PixelDialect.h"
-#include "PixelPasses.h"
-#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
-#include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
-#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
-#include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Verifier.h"
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Transforms/Passes.h"
-#include "../include/pixel_frontend.h"
-#include "llvm/Support/raw_ostream.h"
-#include <fstream>
-using namespace mlir;
-using namespace pixel;
-using namespace std;
-using llvm::outs;
-using llvm::errs;
-using llvm::raw_string_ostream;
+#include "main.h"
 
-string loadFile(const string &filename) {
+optional<string> loadFile(const string &filename) {
   ifstream file(filename);
   if (!file.is_open()) {
     errs() << "Error: Cannot open file '" << filename << "'\n";
-    exit(EXIT_FAILURE);
+    return nullopt;
   }
-  return {(istreambuf_iterator<char>(file)), istreambuf_iterator<char>()};
+  return {{istreambuf_iterator<char>(file), istreambuf_iterator<char>()}};
 }
 
-void writeToFile(const string &filename, const string &content) {
-  if (ofstream file(filename); file.is_open()) {
+bool writeToFile(const string &filename, const string &content) {
+  if (error_code e; !filesystem::create_directory(DIR_OUT, e) && e) {
+    errs() << "Error: Could not create directory '" << DIR_OUT
+           << "': " << e.message() << "\n";
+    return false;
+  }
+
+  const auto file_path = DIR_OUT + filename;
+  if (ofstream file(file_path); file.is_open()) {
     file << content;
-    return;
+    return true;
   }
-  errs() << "Error: Cannot write to file '" << filename << "'\n";
-  exit(EXIT_FAILURE);
+
+  errs() << "Error: Cannot write to file '" << file_path << "'\n";
+  return false;
 }
 
-int main(int argc, char **argv) {
+bool gen_hi_mlir(const OwningOpRef<ModuleOp> &module) {
+  outs() << "[2/9] Generating main program high-level MLIR...\n";
+  string highLevelMLIR;
+  raw_string_ostream highLevelStream(highLevelMLIR);
+  module.get().print(highLevelStream);
+  return writeToFile("main_high_level.mlir", highLevelMLIR);
+}
+
+bool gen_lo_mlir(const OwningOpRef<ModuleOp> &module) {
+  outs() << "[4/9] Generating main program low-level MLIR...\n";
+  string lowLevelMLIR;
+  raw_string_ostream lowLevelStream(lowLevelMLIR);
+  module.get().print(lowLevelStream);
+  return writeToFile("main_low_level.mlir", lowLevelMLIR);
+}
+
+bool gen_llvm() {
+  outs() << "[5/9] Generating main program LLVM IR...\n";
+  if (system(CMD_GEN_LLVM.c_str()) == EXIT_SUCCESS)
+    return true;
+  errs() << "Error: Failed to generate LLVM IR (mlir-translate not found)\n";
+  return false;
+}
+
+void gen_asm() {
+  outs() << "[6/9] Generating main program assembly...\n";
+  if (system(CMD_GEN_ASM.c_str()) == EXIT_SUCCESS)
+    return;
+  errs() << "Warning: Failed to generate assembly for main program\n";
+}
+
+bool gen_runtime_llvm() {
+  outs() << "[7/9] Generating runtime LLVM IR...\n";
+  if (system(CMD_GEN_RUNTIME_LLVM.c_str()) == EXIT_SUCCESS)
+    return true;
+  errs() << "Error: Failed to generate runtime LLVM IR\n";
+  return false;
+}
+
+void gen_runtime_mlir() {
+  outs() << "[8/9] Generating runtime MLIR...\n";
+  if (system(CMD_GEN_RUNTIME_MLIR.c_str()) == EXIT_SUCCESS)
+    return;
+  errs() << "Warning: Failed to generate runtime MLIR\n";
+}
+
+void gen_runtime_asm() {
+  if (system(CMD_GEN_RUNTIME_ASM.c_str()) == EXIT_SUCCESS)
+    return;
+  errs() << "Warning: Failed to generate runtime assembly\n";
+}
+
+bool gen_obj() {
+  if (system(GEN_OBJ.c_str()) == EXIT_SUCCESS)
+    return true;
+  errs() << "Error: Failed to compile runtime\n";
+  return false;
+}
+
+bool link_exec() {
+  outs() << "[9/9] Linking executable...\n";
+  string outputName = filesystem::path(inputFile).stem().string();
+  const string cmd =
+      format("clang++ {0}main.ll {0}pixel_runtime.o -o {0}{1} -lm 2>/dev/null",
+             DIR_OUT, outputName);
+  if (system(cmd.c_str()) == EXIT_SUCCESS)
+    return true;
+  errs() << "Error: Failed to link executable\n";
+  return false;
+}
+
+int main(const int argc, char **argv) {
   if (argc != 2) {
     errs() << "Usage: " << argv[0] << " <input.px>\n";
-    return 1;
+    return EXIT_FAILURE;
   }
-
-  auto inputFile = argv[1];
+  inputFile = argv[1];
 
   // Create MLIR context with all necessary dialects
   MLIRContext context;
@@ -61,24 +117,28 @@ int main(int argc, char **argv) {
   context.getOrLoadDialect<memref::MemRefDialect>();
   context.getOrLoadDialect<LLVM::LLVMDialect>();
 
+  outs() << "Compiling Pixel Program\n";
+  // ========================================================================
+  // PART 1: Compile Main Program (Pixel Script)
+  // ========================================================================
   // Parse .px script
-  outs() << "[1/5] Parsing Pixel script...\n";
-  auto module = parsePixelScript(loadFile(inputFile), context);
+  outs() << "[1/9] Parsing Pixel script...\n";
+  const auto fileContent = loadFile(inputFile);
+  if (!fileContent) return EXIT_FAILURE;
+
+  auto module = parsePixelScript(*fileContent, context);
 
   if (!module || failed(verify(*module))) {
     errs() << "Error: Failed to parse or verify script\n";
     return EXIT_FAILURE;
   }
 
-  // Save high-level MLIR
-  outs() << "[2/5] Generating high-level MLIR...\n";
-  string highLevelMLIR;
-  raw_string_ostream highLevelStream(highLevelMLIR);
-  module->print(highLevelStream);
-  writeToFile("output_high_level.mlir", highLevelMLIR);
+  // Save high-level MLIR (Pixel dialect)
+  if (!gen_hi_mlir(module))
+    return EXIT_FAILURE;
 
   // Lower to LLVM dialect
-  outs() << "[3/5] Lowering to LLVM dialect...\n";
+  outs() << "[3/9] Lowering main program to LLVM dialect...\n";
   PassManager pm(module->getContext());
   pm.addPass(createPixelToLLVMLoweringPass());
   pm.addPass(createArithToLLVMConversionPass());
@@ -91,40 +151,37 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  // Save low-level MLIR
-  string lowLevelMLIR;
-  raw_string_ostream lowLevelStream(lowLevelMLIR);
-  module->print(lowLevelStream);
-  writeToFile("output_low_level.mlir", lowLevelMLIR);
-
-  // Generate LLVM IR
-  outs() << "[4/5] Generating LLVM IR...\n";
-  int result = system(
-    "command -v mlir-translate >/dev/null 2>&1 && mlir-translate --mlir-to-llvmir output_low_level.mlir -o output.ll 2>/dev/null || "
-    "../llvm/bin/mlir-translate --mlir-to-llvmir output_low_level.mlir -o output.ll 2>/dev/null || "
-    "llvm/bin/mlir-translate --mlir-to-llvmir output_low_level.mlir -o output.ll 2>/dev/null");
-
-  if (result != EXIT_SUCCESS) {
-    errs() << "Error: Failed to generate LLVM IR (mlir-translate not found)\n";
+  // Save low-level MLIR (LLVM dialect)
+  if (!gen_lo_mlir(module))
     return EXIT_FAILURE;
-  }
 
-  // Compile to executable
-  outs() << "[5/5] Compiling to executable...\n";
-  result = system("clang++ -c src/pixel_runtime.cpp -Iinclude -o pixel_runtime.o 2>/dev/null && "
-    "clang++ output.ll pixel_runtime.o -o pixel_program -lm 2>/dev/null");
+  // Generate LLVM IR for main program
+  if (!gen_llvm()) return EXIT_FAILURE;
 
-  if (result != EXIT_SUCCESS) {
-    errs() << "Error: Failed to compile executable\n";
+  // Generate assembly for main program
+  gen_asm();
+
+  // ========================================================================
+  // PART 2: Compile Runtime Library
+  // ========================================================================
+  // Generate runtime LLVM IR
+  if (!gen_runtime_llvm()) return EXIT_FAILURE;
+
+  // Convert runtime LLVM IR to MLIR
+  gen_runtime_mlir();
+
+  // Generate runtime assembly
+  gen_runtime_asm();
+
+  // Compile runtime to object file
+  if (!gen_obj())
     return EXIT_FAILURE;
-  }
 
-  outs() << "\nSuccess! Generated:\n";
-  outs() << "  output_high_level.mlir - High-level Pixel dialect MLIR\n";
-  outs() << "  output_low_level.mlir  - Low-level LLVM dialect MLIR\n";
-  outs() << "  output.ll              - LLVM IR\n";
-  outs() << "  pixel_program          - Executable\n\n";
-  outs() << "Run with: ./pixel_program\n";
+  // ========================================================================
+  // PART 3: Link Final Executable
+  // ========================================================================
+  if (!link_exec())
+    return EXIT_FAILURE;
 
   return EXIT_SUCCESS;
 }
