@@ -3,7 +3,7 @@
 // Implementation of runtime support for BMP image processing
 //
 //===----------------------------------------------------------------------===//
-#include "../include/pixel_runtime.h"
+#include "pixel_runtime.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

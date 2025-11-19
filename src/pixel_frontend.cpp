@@ -3,7 +3,7 @@
 // Parser implementation for .px files
 //
 //===----------------------------------------------------------------------===//
-#include "../include/pixel_frontend.h"
+#include "pixel_frontend.h"
 #include "PixelDialect.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
